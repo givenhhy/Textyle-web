@@ -26,6 +26,39 @@ import { notify } from '../../lib/notify';
 const FASHION_API_URL = process.env.EXPO_PUBLIC_FASHION_API_URL?.replace(/\/$/, '');
 const PLACEHOLDER_IMAGE_URL = 'https://via.placeholder.com/200?text=No+Image';
 
+// 웹에서 무신사 이미지(image.msscdn.net)는 브라우저가 직접 읽을 수 없다(CORS).
+// 그래서 같은 사이트 주소인 /img-proxy 로 요청하고, Vercel이 대신 받아 넘겨준다(vercel.json rewrites 참고).
+// 프록시가 없는 환경(로컬 expo start 등)이면 예전처럼 원래 주소로 직접 요청한다.
+const MUSINSA_IMAGE_HOST = 'image.msscdn.net';
+
+function toImageProxyPath(uri: string): string | null {
+  try {
+    const url = new URL(uri, 'https://localhost');
+    if (url.hostname !== MUSINSA_IMAGE_HOST) return null;
+    return `/img-proxy${url.pathname}${url.search}`;
+  } catch {
+    return null;
+  }
+}
+
+async function fetchImageBlobOnWeb(uri: string): Promise<Blob> {
+  const proxyPath = toImageProxyPath(uri);
+  if (proxyPath) {
+    try {
+      const proxied = await fetch(proxyPath);
+      const contentType = proxied.headers.get('content-type') || '';
+      if (proxied.ok && contentType.startsWith('image/')) {
+        return await proxied.blob();
+      }
+    } catch {
+      // 아래 직접 요청으로 넘어간다.
+    }
+  }
+  const response = await fetch(uri);
+  if (!response.ok) throw new Error(`HTTP ${response.status}`);
+  return await response.blob();
+}
+
 // 웹 브라우저용 검색 요청. expo-file-system(uploadAsync 등)은 웹에서 동작하지 않아 fetch + FormData로 보낸다.
 // 앱(iOS/Android)은 searchClothes 안의 기존 방식을 그대로 쓴다.
 async function requestSearchOnWeb(params: {
@@ -43,9 +76,7 @@ async function requestSearchOnWeb(params: {
     blob = params.file;
   } else {
     try {
-      const imageResponse = await fetch(params.imageUri);
-      if (!imageResponse.ok) throw new Error(`HTTP ${imageResponse.status}`);
-      blob = await imageResponse.blob();
+      blob = await fetchImageBlobOnWeb(params.imageUri);
     } catch (e) {
       throw new Error('이미지를 불러오지 못했습니다. 사진을 다시 선택해주세요.');
     }
