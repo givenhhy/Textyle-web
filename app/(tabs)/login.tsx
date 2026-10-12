@@ -15,6 +15,7 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { notify } from '../../lib/notify';
+import { clearLoginTokens, saveLoginTokens } from '../../lib/auth';
 
 export default function LoginScreen() {
   const [session, setSession] = useState(false);
@@ -66,7 +67,7 @@ export default function LoginScreen() {
       if (response.ok) {
         const data = await response.json();
         // 스프링 부트에서 넘겨준 토큰 저장
-        await AsyncStorage.setItem('userToken', data.accessToken);
+        await saveLoginTokens(data.accessToken, data.refreshToken);
         await AsyncStorage.setItem('userEmail', data.email || email);
         if (data.nickname) await AsyncStorage.setItem('userNickname', data.nickname);
         
@@ -83,9 +84,7 @@ export default function LoginScreen() {
   };
 
   const signOut = async () => {
-    await AsyncStorage.removeItem('userToken');
-    await AsyncStorage.removeItem('userEmail');
-    await AsyncStorage.removeItem('userNickname');
+    await clearLoginTokens();
     setSession(false);
     setPassword('');
     setShowEmailForm(false);
