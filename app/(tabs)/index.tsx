@@ -437,7 +437,7 @@ export default function SearchScreen() {
       }
 
       const response = await FileSystem.uploadAsync(
-  `     ${FASHION_API_URL}/api/search`,
+        `${FASHION_API_URL}/api/search`,
         uploadUri,
         {
           httpMethod: 'POST',
