@@ -17,7 +17,6 @@ import { addBookmark, fetchBookmarkedIds, removeBookmark } from '../lib/bookmark
 import { setSearchPresetImage } from '../lib/searchPreset';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { notify } from '../lib/notify';
-import { AuthExpiredError } from '../lib/auth';
 
 const PLACEHOLDER_IMAGE_URL = 'https://via.placeholder.com/400?text=No+Image';
 
@@ -125,12 +124,7 @@ export default function ProductDetailScreen() {
     } catch (error) {
       setBookmarked(wasBookmarked); // 롤백
       console.error('찜 처리 실패:', error);
-      if (error instanceof AuthExpiredError) {
-        setIsLoggedIn(false);
-        notify('로그인 필요', error.message);
-      } else {
-        notify('오류', '찜 처리에 실패했습니다. 잠시 후 다시 시도해주세요.');
-      }
+      notify('오류', '찜 처리에 실패했습니다. 잠시 후 다시 시도해주세요.');
     } finally {
       setToggling(false);
     }

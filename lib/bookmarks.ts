@@ -1,4 +1,4 @@
-import { authFetch } from './auth';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 
 export type BookmarkClothes = {
   id: number;
@@ -19,11 +19,22 @@ export type BookmarkRow = {
 
 const getApiUrl = () => process.env.EXPO_PUBLIC_FASHION_API_URL?.replace(/\/$/, '') || 'http://localhost:8080';
 
-const JSON_HEADERS = { 'Content-Type': 'application/json' };
+const getHeaders = async () => {
+  const token = await AsyncStorage.getItem('userToken');
+
+  if (!token) {
+    throw new Error('로그인이 필요합니다.');
+  }
+
+  return {
+    'Content-Type': 'application/json',
+    Authorization: `Bearer ${token}`,
+  };
+};
 
 export async function fetchBookmarkedIds(): Promise<number[]> {
-  const response = await authFetch(`${getApiUrl()}/api/bookmarks`, {
-    headers: JSON_HEADERS,
+  const response = await fetch(`${getApiUrl()}/api/bookmarks`, {
+    headers: await getHeaders(),
   });
   if (!response.ok) {
     throw new Error('Failed to fetch bookmarked ids');
@@ -36,8 +47,8 @@ export async function fetchBookmarkedIds(): Promise<number[]> {
 
 
 export async function fetchBookmarks(): Promise<BookmarkRow[]> {
-  const response = await authFetch(`${getApiUrl()}/api/bookmarks`, {
-    headers: JSON_HEADERS,
+  const response = await fetch(`${getApiUrl()}/api/bookmarks`, {
+    headers: await getHeaders(),
   });
   if (!response.ok) throw new Error('Failed to fetch bookmarks');
   
@@ -45,17 +56,17 @@ export async function fetchBookmarks(): Promise<BookmarkRow[]> {
 }
 
 export async function addBookmark(clothId: number): Promise<void> {
-  const response = await authFetch(`${getApiUrl()}/api/bookmarks/${clothId}`, {
+  const response = await fetch(`${getApiUrl()}/api/bookmarks/${clothId}`, {
     method: 'POST',
-    headers: JSON_HEADERS,
+    headers: await getHeaders(),
   });
   if (!response.ok) throw new Error('Failed to add bookmark');
 }
 
 export async function removeBookmark(clothId: number): Promise<void> {
-  const response = await authFetch(`${getApiUrl()}/api/bookmarks/${clothId}`, {
+  const response = await fetch(`${getApiUrl()}/api/bookmarks/${clothId}`, {
     method: 'DELETE',
-    headers: JSON_HEADERS,
+    headers: await getHeaders(),
   });
   if (!response.ok) throw new Error('Failed to remove bookmark');
 }
