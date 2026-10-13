@@ -49,7 +49,7 @@ export async function getAccessToken(forceRefresh = false): Promise<string | nul
 }
 
 export async function clearLoginTokens() {
-  await AsyncStorage.multiRemove([TOKEN_KEY, 'userEmail', 'userNickname']);
+  await AsyncStorage.multiRemove([TOKEN_KEY, 'userEmail', 'userNickname', 'userProvider']);
   try {
     await supabase.auth.signOut({ scope: 'local' });
   } catch (error) {
