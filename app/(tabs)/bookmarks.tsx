@@ -19,6 +19,7 @@ import { BookmarkRow, fetchBookmarks, removeBookmark } from '../../lib/bookmarks
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { supabase } from '../../supabase';
 import { notify } from '../../lib/notify';
+import { AuthExpiredError } from '../../lib/auth';
 
 const PLACEHOLDER_IMAGE_URL = 'https://via.placeholder.com/200?text=No+Image';
 
@@ -55,6 +56,12 @@ export default function BookmarksScreen() {
         const rows = await fetchBookmarks();
         setBookmarks(rows);
       } catch (error: any) {
+        if (error instanceof AuthExpiredError) {
+          // 로그인이 만료되면 로그인 안내 화면으로 바꾼다
+          setIsLoggedIn(false);
+          setBookmarks([]);
+          return;
+        }
         setErrorMessage(error.message || '데이터를 불러오지 못했습니다.');
       } finally {
         setLoading(false);
@@ -82,8 +89,13 @@ export default function BookmarksScreen() {
       await removeBookmark(clothId);
     } catch (error) {
       console.error('찜 해제 실패:', error);
-      notify('찜 해제 실패', '문제가 발생했습니다. 다시 시도해주세요.');
       setBookmarks(snapshot); // 롤백
+      if (error instanceof AuthExpiredError) {
+        setIsLoggedIn(false);
+        notify('로그인 필요', error.message);
+      } else {
+        notify('찜 해제 실패', '문제가 발생했습니다. 다시 시도해주세요.');
+      }
     } finally {
       setRemovingIds((prev) => {
         const next = new Set(prev);

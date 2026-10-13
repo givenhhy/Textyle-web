@@ -22,6 +22,7 @@ import { addBookmark, fetchBookmarkedIds, removeBookmark } from '../../lib/bookm
 import { consumeSearchPresetImage } from '../../lib/searchPreset';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { notify } from '../../lib/notify';
+import { AuthExpiredError } from '../../lib/auth';
 
 const FASHION_API_URL = process.env.EXPO_PUBLIC_FASHION_API_URL?.replace(/\/$/, '');
 const PLACEHOLDER_IMAGE_URL = 'https://via.placeholder.com/200?text=No+Image';
@@ -325,7 +326,12 @@ export default function SearchScreen() {
         return next;
       });
       console.error('북마크 토글 실패:', error);
-      notify('오류', '찜 설정에 실패했습니다. 다시 시도해주세요.');
+      if (error instanceof AuthExpiredError) {
+        setIsLoggedIn(false);
+        notify('로그인 필요', error.message);
+      } else {
+        notify('오류', '찜 설정에 실패했습니다. 다시 시도해주세요.');
+      }
     } finally {
       setTogglingIds((prev) => {
         const next = new Set(prev);
@@ -431,7 +437,7 @@ export default function SearchScreen() {
       }
 
       const response = await FileSystem.uploadAsync(
-  `     ${FASHION_API_URL}/api/search`,
+        `${FASHION_API_URL}/api/search`,
         uploadUri,
         {
           httpMethod: 'POST',

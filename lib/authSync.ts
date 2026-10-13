@@ -1,15 +1,48 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import type { Session } from '@supabase/supabase-js';
 import { Platform } from 'react-native';
+import { notify } from './notify';
 import { supabase } from '../supabase';
 
+type SessionLike = Pick<Session, 'access_token' | 'refresh_token' | 'user'>;
+
+const getApiUrl = () => process.env.EXPO_PUBLIC_FASHION_API_URL?.replace(/\/$/, '') || 'http://localhost:8080';
+
+// _layout, 로그인 화면, 인증 상태 리스너가 같은 세션으로 동시에 호출해도 한 번만 처리한다.
+let lastSyncedToken: string | null = null;
+let syncInFlight: Promise<void> | null = null;
+
+// 주소창에서 로그인 관련 값(code, access_token, error 등)만 지운다. 다른 화면의 주소 파라미터는 건드리지 않는다.
+const AUTH_QUERY_KEYS = ['code', 'state', 'error', 'error_code', 'error_description'];
+
+const clearAuthParamsFromUrl = () => {
+  if (Platform.OS !== 'web' || typeof window === 'undefined' || !window.history?.replaceState) return;
+  const url = new URL(window.location.href);
+  let changed = false;
+  for (const key of AUTH_QUERY_KEYS) {
+    if (url.searchParams.has(key)) {
+      url.searchParams.delete(key);
+      changed = true;
+    }
+  }
+  if (/access_token=|error=/.test(url.hash)) {
+    url.hash = '';
+    changed = true;
+  }
+  if (changed) window.history.replaceState(window.history.state, '', url.toString());
+};
+
+/**
+ * 웹에서 구글 로그인 후 돌아왔을 때 처리한다.
+ * 주소의 ?code= / #access_token= 은 supabase 클라이언트(detectSessionInUrl)가 자동으로 세션으로 바꾸므로
+ * 여기서는 코드를 다시 교환하지 않고, 에러만 확인한 뒤 만들어진 세션을 동기화한다.
+ */
 export const handleGlobalOAuthRedirect = async (): Promise<boolean> => {
   if (Platform.OS !== 'web' || typeof window === 'undefined') return false;
 
   try {
     const searchParams = new URLSearchParams(window.location.search);
     const hashParams = new URLSearchParams(window.location.hash ? window.location.hash.substring(1) : '');
-
-    // 1. 에러 체크
     const errorDesc =
       searchParams.get('error_description') ||
       searchParams.get('error') ||
@@ -17,121 +50,89 @@ export const handleGlobalOAuthRedirect = async (): Promise<boolean> => {
       hashParams.get('error');
 
     if (errorDesc) {
-      console.error('❌ Google OAuth 에러 발생:', decodeURIComponent(errorDesc));
-      alert('구글 로그인 실패: ' + decodeURIComponent(errorDesc));
+      console.error('구글 로그인 에러:', errorDesc);
+      clearAuthParamsFromUrl();
+      notify('구글 로그인 실패', errorDesc);
       return false;
     }
 
-    // 2. PKCE code 확인 (?code=...)
-    const code = searchParams.get('code');
-    if (code) {
-      console.log('🔥 PKCE code 감지됨, exchangeCodeForSession 진행 중... code:', code);
-      const { data, error } = await supabase.auth.exchangeCodeForSession(code);
-      if (error) {
-        console.error('❌ PKCE exchangeCodeForSession 실패:', error.message);
-      } else if (data?.session) {
-        console.log('✅ PKCE 세션 획득 성공:', data.session.user.email);
-        await syncSessionToStorageAndDB(data.session);
-        if (typeof window !== 'undefined' && window.history?.replaceState) {
-          window.history.replaceState({}, document.title, window.location.pathname);
-        }
-        return true;
-      }
-    }
-
-    // 3. Hash access_token 확인 (#access_token=...) (Implicit Flow)
-    const accessToken = hashParams.get('access_token');
-    const refreshToken = hashParams.get('refresh_token');
-    if (accessToken) {
-      console.log('🔥 Hash access_token 감지됨, 유저 정보 조회...');
-      const { data: userData } = await supabase.auth.getUser(accessToken);
-      if (userData?.user) {
-        await syncSessionToStorageAndDB({
-          access_token: accessToken,
-          refresh_token: refreshToken || '',
-          user: userData.user,
-        });
-        if (typeof window !== 'undefined' && window.history?.replaceState) {
-          window.history.replaceState({}, document.title, window.location.pathname);
-        }
-        return true;
-      }
-    }
-
-    // 4. 기존 Supabase 세션 감지
-    const { data: { session: existingSession } } = await supabase.auth.getSession();
-    if (existingSession) {
-      await syncSessionToStorageAndDB(existingSession);
+    // getSession()은 클라이언트 초기화(주소의 code/token 처리 포함)가 끝날 때까지 기다린 뒤 세션을 돌려준다.
+    const {
+      data: { session },
+    } = await supabase.auth.getSession();
+    if (session) {
+      await syncSessionToStorageAndDB(session);
       return true;
     }
   } catch (err) {
-    console.error('Global OAuth redirect 처리 예외:', err);
+    console.error('구글 로그인 리다이렉트 처리 예외:', err);
   }
 
   return false;
 };
 
-export const syncSessionToStorageAndDB = async (oSession: any) => {
-  if (!oSession || !oSession.access_token || !oSession.user) return;
+const runSync = async (session: SessionLike) => {
+  const user = session.user;
+  const accessToken = session.access_token;
+  const provider = (user.app_metadata?.provider as string | undefined) || 'email';
 
-  const user = oSession.user;
-  const accessToken = oSession.access_token;
-  const refreshToken = oSession.refresh_token || '';
+  // 이메일 계정은 로그인할 때 프로필을 이미 저장했으므로 토큰만 최신으로 맞춘다.
+  if (provider === 'email') {
+    await AsyncStorage.setItem('userToken', accessToken);
+    lastSyncedToken = accessToken;
+    return;
+  }
+
   const email = (user.email || '').trim().toLowerCase();
-
-  const autoNickname =
+  let nickname =
     user.user_metadata?.full_name ||
     user.user_metadata?.name ||
     (email.includes('@') ? email.split('@')[0] : '') ||
     'textyle-user';
 
-  let finalNickname = autoNickname;
-
-  // 1. Supabase PostgreSQL users 테이블에 직접 upsert (백엔드 배포 여부와 무관하게 DB에 즉시 등록 보장!)
+  // 회원 등록은 스프링 서버(/api/auth/social-login)와 DB 트리거가 맡는다. 브라우저에서 users 테이블에 직접 쓰지 않는다.
   try {
-    const { error: dbError } = await supabase.from('users').upsert({
-      id: user.id,
-      email: email,
-      nickname: autoNickname,
-    });
-    if (dbError) {
-      console.warn('⚠️ Supabase users 테이블 직접 upsert 경고:', dbError.message);
-    } else {
-      console.log('✅ Supabase users 테이블에 DB 등록 완료:', email);
-    }
-  } catch (dbErr) {
-    console.warn('Supabase DB 직접 연동 예외:', dbErr);
-  }
-
-  // 2. 스프링 부트 소셜 로그인 API 호출 (배포 서버 지원 시)
-  try {
-    const API_URL = process.env.EXPO_PUBLIC_FASHION_API_URL?.replace(/\/$/, '') || 'http://localhost:8080';
-    const res = await fetch(`${API_URL}/api/auth/social-login`, {
+    const res = await fetch(`${getApiUrl()}/api/auth/social-login`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         accessToken,
-        refreshToken,
+        refreshToken: session.refresh_token || '',
         email,
-        nickname: autoNickname,
+        nickname,
       }),
     });
     if (res.ok) {
       const data = await res.json();
-      if (data.nickname) finalNickname = data.nickname;
+      if (data.nickname) nickname = data.nickname;
+    } else {
+      console.warn('소셜 로그인 동기화 실패:', res.status);
     }
-  } catch (backendErr) {
-    console.warn('백엔드 소셜 API 호출 실패 (무시하고 로컬 세션 유지):', backendErr);
+  } catch (err) {
+    console.warn('소셜 로그인 동기화 요청 실패 (로그인 세션은 유지):', err);
   }
 
-  // 3. AsyncStorage 세션 저장
-  await AsyncStorage.setItem('userToken', accessToken);
-  await AsyncStorage.setItem('userEmail', email);
-  await AsyncStorage.setItem('userNickname', finalNickname);
-  await AsyncStorage.setItem('userProvider', 'google');
+  await AsyncStorage.multiSet([
+    ['userToken', accessToken],
+    ['userEmail', email],
+    ['userNickname', nickname],
+    ['userProvider', provider],
+  ]);
+  lastSyncedToken = accessToken;
+  clearAuthParamsFromUrl();
+};
 
-  // 4. 주소창 정리 (code=..., access_token=... 제거)
-  if (Platform.OS === 'web' && typeof window !== 'undefined' && window.history) {
-    window.history.replaceState(null, '', window.location.pathname);
+export const syncSessionToStorageAndDB = async (session: SessionLike | null | undefined): Promise<void> => {
+  if (!session?.access_token || !session.user) return;
+  if (session.access_token === lastSyncedToken) return;
+
+  if (syncInFlight) {
+    await syncInFlight;
+    if (session.access_token === lastSyncedToken) return;
   }
+
+  syncInFlight = runSync(session).finally(() => {
+    syncInFlight = null;
+  });
+  await syncInFlight;
 };

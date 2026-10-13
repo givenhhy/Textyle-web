@@ -17,6 +17,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { notify } from '../../lib/notify';
 import { supabase } from '../../supabase';
 import { handleGlobalOAuthRedirect, syncSessionToStorageAndDB } from '../../lib/authSync';
+import { clearLoginTokens, saveLoginTokens } from '../../lib/auth';
 
 export default function LoginScreen() {
   const [session, setSession] = useState(false);
@@ -162,7 +163,8 @@ export default function LoginScreen() {
 
       if (response.ok) {
         const data = await response.json();
-        await AsyncStorage.setItem('userToken', data.accessToken);
+        // refresh token까지 저장해야 1시간 뒤에도 토큰이 자동 갱신된다 (lib/auth.ts)
+        await saveLoginTokens(data.accessToken, data.refreshToken);
         await AsyncStorage.setItem('userEmail', data.email || email.trim().toLowerCase());
         if (data.nickname) await AsyncStorage.setItem('userNickname', data.nickname);
         await AsyncStorage.setItem('userProvider', 'email');
@@ -181,13 +183,8 @@ export default function LoginScreen() {
   };
 
   const signOut = async () => {
-    try {
-      await supabase.auth.signOut();
-    } catch (e) {}
-    await AsyncStorage.removeItem('userToken');
-    await AsyncStorage.removeItem('userEmail');
-    await AsyncStorage.removeItem('userNickname');
-    await AsyncStorage.removeItem('userProvider');
+    // 저장된 토큰·프로필과 Supabase 세션을 함께 지운다 (이 기기만 로그아웃)
+    await clearLoginTokens();
     setSession(false);
     setPassword('');
     setShowEmailForm(false);
