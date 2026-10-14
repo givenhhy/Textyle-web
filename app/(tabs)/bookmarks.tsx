@@ -15,7 +15,7 @@ import {
   View,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { BookmarkRow, fetchBookmarks, removeBookmark } from '../../lib/bookmarks';
+import { addBookmark, BookmarkRow, fetchBookmarks, removeBookmark } from '../../lib/bookmarks';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { supabase } from '../../supabase';
 import { notify } from '../../lib/notify';
@@ -29,6 +29,9 @@ export default function BookmarksScreen() {
   const [loading, setLoading] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
   const [removingIds, setRemovingIds] = useState<Set<number>>(new Set());
+  // 이 화면에서 찜 해제한 상품. 목록에서 바로 빼지 않고 빈 하트로만 보여주고,
+  // 새로고침하거나 다른 탭에 갔다가 돌아와 목록을 다시 불러올 때 빠진다.
+  const [unbookmarkedIds, setUnbookmarkedIds] = useState<Set<number>>(new Set());
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
   const checkLoginStatus = async () => {
@@ -55,6 +58,7 @@ export default function BookmarksScreen() {
       try {
         const rows = await fetchBookmarks();
         setBookmarks(rows);
+        setUnbookmarkedIds(new Set());
       } catch (error: any) {
         if (error instanceof AuthExpiredError) {
           // 로그인이 만료되면 로그인 안내 화면으로 바꾼다
@@ -78,23 +82,33 @@ export default function BookmarksScreen() {
     }, [loadBookmarks])
   );
 
-  const handleRemove = async (clothId: number) => {
+  // 하트를 누르면 찜 해제 ↔ 다시 찜을 오간다. 해제해도 목록에는 남겨 두고 하트만 비운다.
+  const handleToggleBookmark = async (clothId: number) => {
     if (!isLoggedIn || removingIds.has(clothId)) return;
 
-    const snapshot = bookmarks;
+    const wasUnbookmarked = unbookmarkedIds.has(clothId);
+    const setUnbookmarked = (value: boolean) =>
+      setUnbookmarkedIds((prev) => {
+        const next = new Set(prev);
+        if (value) next.add(clothId);
+        else next.delete(clothId);
+        return next;
+      });
+
     setRemovingIds((prev) => new Set(prev).add(clothId));
-    setBookmarks((prev) => prev.filter((row) => row.cloth_id !== clothId)); // 낙관적 제거
+    setUnbookmarked(!wasUnbookmarked); // 낙관적 업데이트
 
     try {
-      await removeBookmark(clothId);
+      if (wasUnbookmarked) await addBookmark(clothId);
+      else await removeBookmark(clothId);
     } catch (error) {
-      console.error('찜 해제 실패:', error);
-      setBookmarks(snapshot); // 롤백
+      console.error(wasUnbookmarked ? '다시 찜하기 실패:' : '찜 해제 실패:', error);
+      setUnbookmarked(wasUnbookmarked); // 롤백
       if (error instanceof AuthExpiredError) {
         setIsLoggedIn(false);
         notify('로그인 필요', error.message);
       } else {
-        notify('찜 해제 실패', '문제가 발생했습니다. 다시 시도해주세요.');
+        notify(wasUnbookmarked ? '찜하기 실패' : '찜 해제 실패', '문제가 발생했습니다. 다시 시도해주세요.');
       }
     } finally {
       setRemovingIds((prev) => {
@@ -185,7 +199,7 @@ export default function BookmarksScreen() {
         }>
         <View style={styles.header}>
           <Text style={styles.screenTitle}>찜한 상품</Text>
-          <Text style={styles.resultCount}>{bookmarks.length}개 상품</Text>
+          <Text style={styles.resultCount}>{bookmarks.length - unbookmarkedIds.size}개 상품</Text>
         </View>
 
         {loading && bookmarks.length === 0 ? (
@@ -214,6 +228,7 @@ export default function BookmarksScreen() {
           bookmarks.map((row) => {
             const cloth = row.clothes;
             const isRemoving = removingIds.has(row.cloth_id);
+            const isUnbookmarked = unbookmarkedIds.has(row.cloth_id);
 
             return (
               <TouchableOpacity
@@ -229,11 +244,15 @@ export default function BookmarksScreen() {
                   />
                   <TouchableOpacity
                     style={styles.heartButton}
-                    onPress={() => handleRemove(row.cloth_id)}
+                    onPress={() => handleToggleBookmark(row.cloth_id)}
                     disabled={isRemoving}
                     hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
                     activeOpacity={0.8}>
-                    <Ionicons name="heart" size={20} color="#EF4444" />
+                    <Ionicons
+                      name={isUnbookmarked ? 'heart-outline' : 'heart'}
+                      size={20}
+                      color={isUnbookmarked ? '#8E8E8E' : '#EF4444'}
+                    />
                   </TouchableOpacity>
                 </View>
                 <View style={styles.resultInfo}>
