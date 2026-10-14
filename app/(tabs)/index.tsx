@@ -970,7 +970,7 @@ const styles = StyleSheet.create({
     color: '#171A20',
     paddingHorizontal: 14,
     paddingVertical: 14,
-    fontSize: 15,
+    fontSize: 16,
     lineHeight: 21,
     textAlignVertical: 'center',
   },

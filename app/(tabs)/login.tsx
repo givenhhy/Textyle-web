@@ -440,7 +440,7 @@ const styles = StyleSheet.create({
   emailScreenTitle: { color: '#171A20', fontSize: 28, lineHeight: 36, fontWeight: '600' },
   emailScreenSubtitle: { marginTop: 8, color: '#5C5E62', fontSize: 14, lineHeight: 20 },
   emailForm: { gap: 10, marginTop: 2 },
-  input: { minHeight: 52, backgroundColor: '#FFFFFF', paddingHorizontal: 14, borderRadius: 6, fontSize: 15, borderWidth: 1, borderColor: '#EEEEEE', color: '#171A20' },
+  input: { minHeight: 52, backgroundColor: '#FFFFFF', paddingHorizontal: 14, borderRadius: 6, fontSize: 16, borderWidth: 1, borderColor: '#EEEEEE', color: '#171A20' },
   passwordContainer: {
     minHeight: 52,
     flexDirection: 'row',
@@ -454,7 +454,7 @@ const styles = StyleSheet.create({
     flex: 1,
     minHeight: 50,
     paddingHorizontal: 14,
-    fontSize: 15,
+    fontSize: 16,
     color: '#171A20',
   },
   eyeButton: {
