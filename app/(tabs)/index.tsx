@@ -201,10 +201,10 @@ const WARNING_LABELS: Record<string, string> = {
 };
 
 const LOADING_MESSAGES = [
-  '🔍 이미지 분석 중...',
-  '🧠 검색 의도 해석 중...',
-  '👕 유사 상품 검색 중...',
-  '⏳ 정밀 검색 중입니다. 조금만 기다려주세요.',
+  '이미지 분석 중...',
+  '검색 의도 해석 중...',
+  '유사 상품 검색 중...',
+  '정밀 검색 중입니다. 조금만 기다려주세요.',
 ];
 
 const getRankingLabels = (ranking?: RankingInfo): string[] => {
